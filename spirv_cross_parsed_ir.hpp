@@ -1,5 +1,6 @@
 /*
- * Copyright 2018-2019 Arm Limited
+ * Copyright 2018-2021 Arm Limited
+ * SPDX-License-Identifier: Apache-2.0 OR MIT
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,6 +13,12 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ */
+
+/*
+ * At your option, you may choose to accept this material under either:
+ *  1. The Apache License, Version 2.0, found at <http://www.apache.org/licenses/LICENSE-2.0>, or
+ *  2. The MIT License, found at <http://opensource.org/licenses/MIT>.
  */
 
 #ifndef SPIRV_CROSS_PARSED_IR_HPP
@@ -57,19 +64,26 @@ public:
 	SmallVector<Variant> ids;
 
 	// Various meta data for IDs, decorations, names, etc.
-	std::unordered_map<uint32_t, Meta> meta;
+	std::unordered_map<ID, Meta> meta;
 
 	// Holds all IDs which have a certain type.
 	// This is needed so we can iterate through a specific kind of resource quickly,
 	// and in-order of module declaration.
-	SmallVector<uint32_t> ids_for_type[TypeCount];
+	SmallVector<ID> ids_for_type[TypeCount];
 
 	// Special purpose lists which contain a union of types.
 	// This is needed so we can declare specialization constants and structs in an interleaved fashion,
 	// among other things.
-	// Constants can be of struct type, and struct array sizes can use specialization constants.
-	SmallVector<uint32_t> ids_for_constant_or_type;
-	SmallVector<uint32_t> ids_for_constant_or_variable;
+	// Constants can be undef or of struct type, and struct array sizes can use specialization constants.
+	SmallVector<ID> ids_for_constant_undef_or_type;
+	SmallVector<ID> ids_for_constant_or_variable;
+
+	// We need to keep track of the width the Ops that contains a type for the
+	// OpSwitch instruction, since this one doesn't contains the type in the
+	// instruction itself. And in some case we need to cast the condition to
+	// wider types. We only need the width to do the branch fixup since the
+	// type check itself can be done at runtime
+	std::unordered_map<ID, uint32_t> load_type_width;
 
 	// Declared capabilities and extensions in the SPIR-V module.
 	// Not really used except for reflection at the moment.
@@ -88,12 +102,12 @@ public:
 	};
 	using BlockMetaFlags = uint8_t;
 	SmallVector<BlockMetaFlags> block_meta;
-	std::unordered_map<uint32_t, uint32_t> continue_block_to_loop_header;
+	std::unordered_map<BlockID, BlockID> continue_block_to_loop_header;
 
 	// Normally, we'd stick SPIREntryPoint in ids array, but it conflicts with SPIRFunction.
 	// Entry points can therefore be seen as some sort of meta structure.
-	std::unordered_map<uint32_t, SPIREntryPoint> entry_points;
-	uint32_t default_entry_point = 0;
+	std::unordered_map<FunctionID, SPIREntryPoint> entry_points;
+	FunctionID default_entry_point = 0;
 
 	struct Source
 	{
@@ -114,34 +128,35 @@ public:
 	// Can be useful for simple "raw" reflection.
 	// However, most members are here because the Parser needs most of these,
 	// and might as well just have the whole suite of decoration/name handling in one place.
-	void set_name(uint32_t id, const std::string &name);
-	const std::string &get_name(uint32_t id) const;
-	void set_decoration(uint32_t id, spv::Decoration decoration, uint32_t argument = 0);
-	void set_decoration_string(uint32_t id, spv::Decoration decoration, const std::string &argument);
-	bool has_decoration(uint32_t id, spv::Decoration decoration) const;
-	uint32_t get_decoration(uint32_t id, spv::Decoration decoration) const;
-	const std::string &get_decoration_string(uint32_t id, spv::Decoration decoration) const;
-	const Bitset &get_decoration_bitset(uint32_t id) const;
-	void unset_decoration(uint32_t id, spv::Decoration decoration);
+	void set_name(ID id, const std::string &name);
+	const std::string &get_name(ID id) const;
+	void set_decoration(ID id, spv::Decoration decoration, uint32_t argument = 0);
+	void set_decoration_string(ID id, spv::Decoration decoration, const std::string &argument);
+	bool has_decoration(ID id, spv::Decoration decoration) const;
+	uint32_t get_decoration(ID id, spv::Decoration decoration) const;
+	const std::string &get_decoration_string(ID id, spv::Decoration decoration) const;
+	const Bitset &get_decoration_bitset(ID id) const;
+	void unset_decoration(ID id, spv::Decoration decoration);
 
 	// Decoration handling methods (for members of a struct).
-	void set_member_name(uint32_t id, uint32_t index, const std::string &name);
-	const std::string &get_member_name(uint32_t id, uint32_t index) const;
-	void set_member_decoration(uint32_t id, uint32_t index, spv::Decoration decoration, uint32_t argument = 0);
-	void set_member_decoration_string(uint32_t id, uint32_t index, spv::Decoration decoration,
+	void set_member_name(TypeID id, uint32_t index, const std::string &name);
+	const std::string &get_member_name(TypeID id, uint32_t index) const;
+	void set_member_decoration(TypeID id, uint32_t index, spv::Decoration decoration, uint32_t argument = 0);
+	void set_member_decoration_string(TypeID id, uint32_t index, spv::Decoration decoration,
 	                                  const std::string &argument);
-	uint32_t get_member_decoration(uint32_t id, uint32_t index, spv::Decoration decoration) const;
-	const std::string &get_member_decoration_string(uint32_t id, uint32_t index, spv::Decoration decoration) const;
-	bool has_member_decoration(uint32_t id, uint32_t index, spv::Decoration decoration) const;
-	const Bitset &get_member_decoration_bitset(uint32_t id, uint32_t index) const;
-	void unset_member_decoration(uint32_t id, uint32_t index, spv::Decoration decoration);
+	uint32_t get_member_decoration(TypeID id, uint32_t index, spv::Decoration decoration) const;
+	const std::string &get_member_decoration_string(TypeID id, uint32_t index, spv::Decoration decoration) const;
+	bool has_member_decoration(TypeID id, uint32_t index, spv::Decoration decoration) const;
+	const Bitset &get_member_decoration_bitset(TypeID id, uint32_t index) const;
+	void unset_member_decoration(TypeID id, uint32_t index, spv::Decoration decoration);
 
-	void mark_used_as_array_length(uint32_t id);
+	void mark_used_as_array_length(ID id);
 	uint32_t increase_bound_by(uint32_t count);
 	Bitset get_buffer_block_flags(const SPIRVariable &var) const;
+	Bitset get_buffer_block_type_flags(const SPIRType &type) const;
 
-	void add_typed_id(Types type, uint32_t id);
-	void remove_typed_id(Types type, uint32_t id);
+	void add_typed_id(Types type, ID id);
+	void remove_typed_id(Types type, ID id);
 
 	class LoopLock
 	{
@@ -198,13 +213,23 @@ public:
 
 	void reset_all_of_type(Types type);
 
-	Meta *find_meta(uint32_t id);
-	const Meta *find_meta(uint32_t id) const;
+	Meta *find_meta(ID id);
+	const Meta *find_meta(ID id) const;
 
 	const std::string &get_empty_string() const
 	{
 		return empty_string;
 	}
+
+	void make_constant_null(uint32_t id, uint32_t type, bool add_to_typed_id_set);
+
+	void fixup_reserved_names();
+
+	static void sanitize_underscores(std::string &str);
+	static void sanitize_identifier(std::string &str, bool member, bool allow_reserved_prefixes);
+	static bool is_globally_reserved_identifier(std::string &str, bool allow_reserved_prefixes);
+
+	uint32_t get_spirv_version() const;
 
 private:
 	template <typename T>
@@ -223,6 +248,8 @@ private:
 	mutable uint32_t loop_iteration_depth_soft = 0;
 	std::string empty_string;
 	Bitset cleared_bitset;
+
+	std::unordered_set<uint32_t> meta_needing_name_fixup;
 };
 } // namespace SPIRV_CROSS_NAMESPACE
 
